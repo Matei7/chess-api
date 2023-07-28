@@ -96,7 +96,60 @@ class Rest extends \WP_REST_Controller {
 				'callback'            => [ __CLASS__, 'update_cart' ],
 				'permission_callback' => '__return_true',
 			],
+			[
+				'methods'             => WP_REST_Server::DELETABLE,
+				'callback'            => [ __CLASS__, 'delete_cart_item' ],
+				'permission_callback' => '__return_true',
+			],
 		] );
+	}
+
+	public static function delete_cart_item( \WP_REST_Request $request ) {
+		$items = $request->get_param( 'products' );
+		$id    = $request->get_param( 'id' );
+		$cart  = get_option( 'cart_' . $id, [] );
+		if ( empty( $cart ) ) {
+			return new WP_REST_Response( [ 'error' => 'Cart not found' ], 404 );
+		}
+		$cart_products = $cart['products'];
+
+		$cart_products = array_filter( $cart_products, static function ( $product ) use ( $items ) {
+			return ! in_array( $product['id'], $items );
+		} );
+
+		$cart_products = array_values( $cart_products );
+
+
+		$total = array_reduce( $cart_products, static function ( $carry, $product ) {
+			return $carry + $product['total'];
+		}, 0 );
+
+		$discountTotal = array_reduce( $cart_products, static function ( $carry, $product ) {
+			return $carry + $product['discountedPrice'];
+		}, 0 );
+
+		$totalProducts = count( $cart_products );
+
+		$totalQuantity = array_reduce( $cart_products, static function ( $carry, $product ) {
+			return $carry + $product['quantity'];
+		}, 0 );
+
+		$cart = [
+			'id'            => $id,
+			'total'         => $total,
+			'discountTotal' => $discountTotal,
+			'totalProducts' => $totalProducts,
+			'totalQuantity' => $totalQuantity,
+			'products'      => $cart_products,
+		];
+
+
+		update_option( 'cart_' . $id, $cart, false );
+
+		return new WP_REST_Response( [
+			'success' => true,
+			'data'    => $cart,
+		], 200 );
 	}
 
 	public static function get_cart( \WP_REST_Request $request ): WP_REST_Response {
@@ -134,16 +187,18 @@ class Rest extends \WP_REST_Controller {
 		} );
 
 		foreach ( $added_products as $product_id ) {
-			$product         = array_values(array_filter( $saved_products, static function ( $item ) use ( $product_id ) {
+			$product         = array_values( array_filter( $saved_products, static function ( $item ) use ( $product_id ) {
 				return $item['id'] === $product_id;
-			} ))[0];
+			} ) )[0];
 			$cart_products[] = $product;
 		}
 
 		//update quantity of old products
 		$cart_products = array_map( static function ( $product ) use ( $new_products ) {
 			$quantity = $product['quantity'] ?? 0;
-			$quantity += $new_products[ $product['id'] ];
+			if ( isset( $new_products[ $product['id'] ] ) ) {
+				$quantity += $new_products[ $product['id'] ];
+			}
 
 			$discount = $product['discountPercentage'] ?? 0;
 			$price    = $product['price'] ?? 0;
@@ -221,7 +276,6 @@ class Rest extends \WP_REST_Controller {
 
 		$all_products = array_values( $all_products );
 
-
 		$total = array_reduce( $all_products, static function ( $carry, $product ) {
 			return $carry + $product['total'];
 		}, 0 );
@@ -265,8 +319,6 @@ class Rest extends \WP_REST_Controller {
 
 			//remove thumbnail and images
 			$data['products'] = array_map( static function ( $product ) {
-				unset( $product['thumbnail'], $product['images'] );
-
 				return $product;
 			}, $data['products'] );
 
