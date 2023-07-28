@@ -111,37 +111,48 @@ class Rest extends \WP_REST_Controller {
 		if ( empty( $cart ) ) {
 			return new WP_REST_Response( [ 'error' => 'Cart not found' ], 404 );
 		}
-		$cart_products = $cart['products'];
+		if ( count( $items ) ) {
+			$cart_products = $cart['products'];
 
-		$cart_products = array_filter( $cart_products, static function ( $product ) use ( $items ) {
-			return ! in_array( $product['id'], $items );
-		} );
+			$cart_products = array_filter( $cart_products, static function ( $product ) use ( $items ) {
+				return ! in_array( $product['id'], $items );
+			} );
 
-		$cart_products = array_values( $cart_products );
+			$cart_products = array_values( $cart_products );
 
 
-		$total = array_reduce( $cart_products, static function ( $carry, $product ) {
-			return $carry + $product['total'];
-		}, 0 );
+			$total = array_reduce( $cart_products, static function ( $carry, $product ) {
+				return $carry + $product['total'];
+			}, 0 );
 
-		$discountTotal = array_reduce( $cart_products, static function ( $carry, $product ) {
-			return $carry + $product['discountedPrice'];
-		}, 0 );
+			$discountTotal = array_reduce( $cart_products, static function ( $carry, $product ) {
+				return $carry + $product['discountedPrice'];
+			}, 0 );
 
-		$totalProducts = count( $cart_products );
+			$totalProducts = count( $cart_products );
 
-		$totalQuantity = array_reduce( $cart_products, static function ( $carry, $product ) {
-			return $carry + $product['quantity'];
-		}, 0 );
+			$totalQuantity = array_reduce( $cart_products, static function ( $carry, $product ) {
+				return $carry + $product['quantity'];
+			}, 0 );
 
-		$cart = [
-			'id'            => $id,
-			'total'         => $total,
-			'discountTotal' => $discountTotal,
-			'totalProducts' => $totalProducts,
-			'totalQuantity' => $totalQuantity,
-			'products'      => $cart_products,
-		];
+			$cart = [
+				'id'            => $id,
+				'total'         => $total,
+				'discountTotal' => $discountTotal,
+				'totalProducts' => $totalProducts,
+				'totalQuantity' => $totalQuantity,
+				'products'      => $cart_products,
+			];
+		} else {
+			$cart = [
+				'id'            => $id,
+				'total'         => 0,
+				'discountTotal' => 0,
+				'totalProducts' => 0,
+				'totalQuantity' => 0,
+				'products'      => [],
+			];
+		}
 
 
 		update_option( 'cart_' . $id, $cart, false );
