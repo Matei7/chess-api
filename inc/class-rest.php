@@ -35,6 +35,31 @@ class Rest extends \WP_REST_Controller {
 			],
 		] );
 
+		register_rest_route( 'internship-api/v1', '/login', [
+			[
+				'methods'             => WP_REST_Server::CREATABLE,
+				'callback'            => [ __CLASS__, 'login_user' ],
+				'permission_callback' => '__return_true',
+				'args'                => [
+					'email'    => [
+						'type'              => 'string',
+						'required'          => true,
+						'validate_callback' => static function ( $param ) {
+
+							return ! empty( $param ) && is_email( $param );
+						},
+					],
+					'password' => [
+						'type'              => 'string',
+						'required'          => true,
+						'validate_callback' => static function ( $param ) {
+							return ! empty( $param );
+						},
+					],
+				],
+			],
+		] );
+
 		register_rest_route( static::REST_NAMESPACE, '/user', [
 			[
 				'methods'             => WP_REST_Server::READABLE,
@@ -104,14 +129,78 @@ class Rest extends \WP_REST_Controller {
 		] );
 	}
 
+
+	public static function login_user( \WP_REST_Request $request ): WP_REST_Response {
+		$email    = $request->get_param( 'email' );
+		$password = $request->get_param( 'password' );
+
+		$user = get_user_by( 'email', $email );
+		if ( ! $user ) {
+			return new WP_REST_Response( [ 'error' => 'User not found' ], 404 );
+		}
+
+		//do WP LOGIN
+		$creds = [
+			'user_login'    => $user->user_login,
+			'user_password' => $password,
+			'remember'      => true,
+		];
+		$login = wp_signon( $creds, false );
+
+		if ( is_wp_error( $login ) ) {
+			return new WP_REST_Response( [ 'error' => 'Wrong password' ], 401 );
+		}
+
+		$login_token = wp_generate_password( 32, false );
+
+		update_user_meta( $user->ID, 'test_login_token', $login_token );
+
+		$login_token = base64_encode( $email . '|||' . $login_token );
+
+		return new WP_REST_Response( [ 'token' => $login_token ], 200 );
+
+	}
+
+
+	public static function validate_token( $token ) {
+		if( empty( $token ) ) {
+			return false;
+		}
+
+		$token = base64_decode( $token );
+		$token = explode( '|||', $token );
+		if ( count( $token ) !== 2 ) {
+			return false;
+		}
+		list( $email, $token ) = $token;
+
+		$user = get_user_by( 'email', $email );
+		if ( ! $user ) {
+			return false;
+		}
+
+		$stored_token = get_user_meta( $user->ID, 'test_login_token', true );
+
+		return $stored_token === $token;
+	}
+
 	public static function delete_cart_item( \WP_REST_Request $request ) {
+		$auth_token = $request->get_header( 'Internship-Auth' );
+
+		if ( ! static::validate_token( $auth_token ) ) {
+			return new WP_REST_Response( [ 'error' => 'Invalid token' ], 401 );
+		}
+
+
 		$items = $request->get_param( 'products' );
 		$id    = $request->get_param( 'id' );
 		$cart  = get_option( 'cart_' . $id, [] );
+
 		if ( empty( $cart ) ) {
 			return new WP_REST_Response( [ 'error' => 'Cart not found' ], 404 );
 		}
-		if ( count( $items ) ) {
+
+		if ( $items && count( $items ) ) {
 			$cart_products = $cart['products'];
 
 			$cart_products = array_filter( $cart_products, static function ( $product ) use ( $items ) {
@@ -164,6 +253,12 @@ class Rest extends \WP_REST_Controller {
 	}
 
 	public static function get_cart( \WP_REST_Request $request ): WP_REST_Response {
+		$auth_token = $request->get_header( 'Internship-Auth' );
+
+		if ( ! static::validate_token( $auth_token ) ) {
+			return new WP_REST_Response( [ 'error' => 'Invalid token' ], 401 );
+		}
+
 		$id = $request->get_param( 'id' );
 
 		return new WP_REST_Response( get_option( 'cart_' . $id, [] ) );
@@ -171,6 +266,13 @@ class Rest extends \WP_REST_Controller {
 
 
 	public static function update_cart( \WP_REST_Request $request ): WP_REST_Response {
+		$auth_token = $request->get_header( 'Internship-Auth' );
+
+		if ( ! static::validate_token( $auth_token ) ) {
+			return new WP_REST_Response( [ 'error' => 'Invalid token' ], 401 );
+		}
+
+
 		$id    = $request->get_param( 'id' );
 		$items = $request->get_param( 'products' );
 		$cart  = get_option( 'cart_' . $id, [] );
@@ -256,7 +358,14 @@ class Rest extends \WP_REST_Controller {
 
 
 	public static function create_cart( \WP_REST_Request $request ): WP_REST_Response {
-		$random_id = uniqid();
+		$auth_token = $request->get_header( 'Internship-Auth' );
+
+		if ( ! static::validate_token( $auth_token ) ) {
+			return new WP_REST_Response( [ 'error' => 'Invalid token' ], 401 );
+		}
+
+
+		$random_id = uniqid( '', true );
 		$items     = $request->get_param( 'products' );
 
 		$used_products = [];
